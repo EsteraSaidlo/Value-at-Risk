@@ -1,0 +1,482 @@
+---
+title: "Projekt 1 - VaR"
+author: "Estera Saidlo"
+date: "29 marca 2019"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+##Wstêp
+
+
+Istnieje wiele metod s³u¿¹cych do pomiaru ryzyka walutowego. Najbardziej powszechn¹ jest metoda <b>Value at Risk(VaR)</b>. Wykorzystuje ona analizê statystycz¹ zmiennoœci kursów w przesz³oœci do oszacowania ryzyka, na jakie wystawiona jest dana inwestycja. Okreœla z du¿ym prawdopodobieñstwem maksymaln¹ stratê, na jak¹ nara¿ona jest inwestycja w okreœlonym horyzoncie czasowym. Nie mówi nam ona jednak, jaka jest spodziewana wartoœæ straty, je¿eli przekroczy ona wartoœæ VaR. Do tego wykorzystywana jest <b>Estimated Shortfall</b>, czyli warunkowa Value at Risk. 
+Przy obliczaniu wartoœci VaR nale¿y mieæ na uwadze fakt, ¿e im wy¿szy bêdzie poziom wspó³czynnika ufnoœci oraz horyzont czasowy, tym wy¿sza bêdzie wartoœæ VaR. Ró¿ni³ siê on bêdzie równie¿ w zale¿noœci od zastosowanej metody. 
+Celem niniejszej pracy jest zastosowanie trzech ró¿nych metod do obliczania wartoœci VaR i sprawdzenie za pomoc¹ testu wstecznego, która z metod da³a najlepsz¹ wartoœæ VaR. 
+
+Do badania u¿yjê metod:
+
+- <b>historycznej prostej</b>,
+
+- <b>historycznej z wagami</b>,
+
+- <b>bootstrapowej</b>,
+
+- <b>EWMA</b>.
+
+<b>Metoda historyczna prosta</b> - sprowadza siê do wykorzystania historycznych stóp zwrotu - w badaniu zostan¹ u¿yte geometryczne stopy zwrotu ze wzglêdu na relatywnoœæ (odniesienie do aktualnego kursu) oraz addytywnoœæ (zwrot w przedziale czasu [to-tk] jest sum¹ zwrotów w momentach t1,t2,...,tk). Nastêpnie zostanie wyznaczony horyzont czasowy (500 dni), na podstawie którego nast¹pi oszacowanie kwantyla rozk³adu i wyznaczenie wartoœci VaR. Skutecznoœæ symulacji historycznej jest uwarunkowana niezmiennoœci¹ stóp zwrot w przysz³oœci w stosunku do danych historycznych.
+
+<b>Metoda historyczna z wagami</b> - polega na nadaniu wy¿szej wagi obserwacjom "œwie¿szym". Jest tyle wag, ile obserwacji w jednym horyzoncie czasowym (500). Stopy zwrotu sortujemy rosn¹co i na podstawie skumulowanych wag wyznaczamy odpowiedni kwantyl (99%). Jako wartoœæ VaR bierzemy obserwacjê, która jako pierwsza przekroczy³a wspó³czynnik ufnoœci.
+
+
+<b>Metoda Bootstrapowa</b> - polega na 20-krotnym wylosowaniu ze zwracaniem próbki 1000 elementów spoœród jednego okna historycznych stóp zwrotu(500 obserwacji), na tej podstawie zostaj¹ wyliczane wartoœci VaR(poprzez oszacowanie kwantyla rozk³adu). Aby obliczyæ wartoœæ VaR przypadaj¹c¹ na konkretny dzieñ, zostanie wyliczona œrednia z 20 wartoœci VaR.
+
+<b>Metoda EWMA</b> - odrzuca ona za³o¿enie o sta³oœci wariancji w czasie. Polega ona na wyliczeniu w ka¿dym horyzoncie czasowym wariancji i nowych wartoœci, na podstawie których zostanie obliczony VaR i ES. W taki sam sposób jak w pozosta³ch metodach.
+
+
+##Przedstawienie i wizualizacja danych 
+
+Badanie zostanie przeprowadzone na podstawie kursów walut:
+
+- <b> EURO</b>,
+
+- <b>THB (Bath tajski)</b>,
+
+- <b>UAH (Hrywna ukraiñska)</b>.
+
+```{r, echo = FALSE, message=FALSE,fig.align = 'center', out.extra='angle=90', warning=FALSE}
+library(lubridate)
+library(ggplot2)
+library(nortest)
+library(reshape2)
+library(GAS)
+library(gridExtra)
+```
+
+
+```{r, echo = FALSE, message=FALSE,fig.align = 'center', out.extra='angle=90', warning=FALSE}
+kursy <- read.csv("C:/Users/User/Desktop/kursy.csv", sep = ";", dec = ",")
+kursy$data <- ymd(kursy$data)
+kursy <- data.frame(kursy$data, kursy$X1THB, kursy$X1EUR, kursy$X1UAH)
+colnames(kursy) <- c("data", "THB", "EUR", "UAH")
+```
+
+Poni¿ej zostan¹ przedstawione statystyki opisowe wybranych kursów walut:
+
+```{r, echo = TRUE, message=FALSE,fig.align = 'center', out.extra='angle=90', warning=FALSE}
+summary(kursy)
+```
+
+Dane dotycz¹ce kursów walut dotycz¹ 6 lat: od stycznia 2012 do grudnia 2018. Wartoœæ waluty jest podana w odniesieniu do z³otówki. Mo¿na zauwa¿yæ, ¿e najbardziej niestabiln¹ walut¹ jest hrywna ukraiñska, której wartoœæ zmienia³a siê w przedziale od 0.1094 do 0.4420. Œrednia wynosi 0.2377 i istotnie ró¿ni siê od mediany, której wartoœæ to 0.1709, co oznacza, ¿e przez po³owê badanego okresu wartoœæ hrywny by³a mniejsza b¹dŸ równa 0.1709 z³. Wartoœæ EURO zmienia³a siê od 3.982 do 4.513, przy czym po³owa obserwacji jest zbli¿ona do œredniej wartoœci EURO z 6 lat. Wartoœæ Batha tajskiego znajduje siê w przedziale od 0.0916 do 0.1192 i nie jest to du¿y rozstrza³. Wartoœæ œredniej i mediany s¹ niemal identyczne i nie ró¿ni¹ siê znacz¹co od pozosta³ych kwantyli, w takim razie nie spodziewam siê du¿ej zmiennoœci.
+
+Poni¿ej zostan¹ przedstawione wykresy zmiany kursów poszczególnych walut w czasie:
+
+```{r, echo = FALSE, message=FALSE,fig.align = 'center', out.extra='angle=90', warning=FALSE}
+p1 <- ggplot(kursy, aes(x = data, y = THB)) + geom_line()
+p2 <- ggplot(kursy, aes(x = data, y = UAH)) + geom_line()
+p3 <- ggplot(kursy, aes(x = data, y = EUR)) + geom_line()
+grid.arrange(p1,p2,p3)
+```
+Przez wiêkszoœæ czasu kurs THB utrzymywa³ siê w przedziale od 0.10 do 0.12 z³. Waluta straci³a na wartoœci pod koniec 2013 roku i do po³owy 2014 jej wartoœæ oscylowa³a w granicach 0.093, po czym zaczê³a rosn¹æ. Najprawdopodobniej ten spadek by³ spowodowany kryzysem politycznym W Tajlandii, który trwa³ od paŸdziernika 2013 do maja 2014. 
+
+
+Kurs UAH niemal do koñca 2013 roku oscylowa³ w granicach 0.4 z³. W 2014 roku nastêpowa³ spadek, który trwa³ do pierwszych miesiêcy 2015 roku, gdzie kurs ustabilizowa³ siê przy wartoœci ok. 0.15 z³. 
+
+
+EURO jest walut¹ dosyæ stabiln¹. Do po³owy 2015 roku jej wartoœæ oscylowa³a w granicach 4.2 z³. w 2016 roku œrednia wartoœæ wzros³a do ok. 4.35, po czym spad³a, a od po³owy 2018 roku ustabilizowa³a siê na wartoœci 4.3 z³.
+
+
+##Przeprowadzenie badania
+
+###Metoda historyczna prosta
+
+```{r, echo = FALSE, message=FALSE,fig.align = 'center', out.extra='angle=90', warning=FALSE}
+set.seed(1)
+```
+
+
+```{r, echo = TRUE, message=FALSE,fig.align = 'center', out.extra='angle=90', warning=FALSE}
+#datê biorê o 502, gdy¿ potrzebujê tylko tych które maj¹ obliczony VaR
+doVaR_h <- data.frame(date = kursy$data[-(1:501)])
+hist <- function(dane){
+  data <- data.frame(data = dane)
+  st_zwrotu <- c()
+  VAR <- c()
+  ES <- c()
+  for (i in 2:nrow(data)){
+    st_zwrotu[i] <- log(data[i,]/data[i-1,])
+  }
+  st_zwrotu <- st_zwrotu[-1]
+  data <- data[-1,1]
+  for(j in 1:(length(data) - 499)){
+    okno <- st_zwrotu[j:(499+j)]
+    #przedstawienie straty jako wartoœæ dodatni¹
+    VAR[499+j] <- -quantile(st_zwrotu[j:(j+499)],0.01, na.rm = T)
+    ES[499+j] <- - mean(okno[st_zwrotu[j:(499+j)] <= -VAR[499+j]])
+  }
+  st_zwrotu <- st_zwrotu[-(1:500)]
+  VAR <- VAR[-(1:500)]
+  ES <- ES[-(1:500)]
+  data <- data[-(1:500)]
+  
+  doVaR_h <- cbind(doVaR_h, data, st_zwrotu, VAR,ES)
+  melt <- melt(doVaR_h, id.vars = c("date", "data"), na.rm = T)
+  z <- ggplot(melt, aes(x = date, y = value, colour = variable)) + geom_line()
+  plot(z)
+  return(doVaR_h$VAR)
+}
+```
+
+<centre><h5><b>EURO</b></h5><centre>
+
+```{r, echo = FALSE, message=FALSE,fig.align = 'center', out.extra='angle=90', warning=FALSE}
+hist_EUR <- hist(kursy$EUR)
+```
+Wed³ug metody historycznej wartoœæ nara¿ona na ryzyko w przypadku EURO zmienia siê z czasem i przyjmuj¹c 1% poziom istotnoœci b³êdu nie przekroczy ona wartoœci wyznaczonej przez liniê zielon¹. Gdybyœmy chcieli zarabiaæ na zmianach kursu EURO w latach 2014-2018 to na 99% nie stracilibyœmy wiêcej ni¿ ok. 0.013 z³ na 1 EURO.
+Niebieska linia znajduj¹ca siê powy¿ej wartoœci nara¿onej na ryzyko informuje o tym, jaka bêdzie oczekiwana strata w tym 1% przypadków, kiedy stracimy wiêcej ni¿ zak³ada VaR. Szum wyznaczony przez liniê czerwon¹ prezentuje rzeczywiste dzienne zmiany kursu EURO. Mo¿na dostrzec obserwacje, w których dzienne zmiany przekraczaj¹ wartoœæ nara¿on¹ na ryzyko. Jednak wa¿ne jest, aby procent obserwacji wychodz¹cych poza poziom VaR oscylowa³ w granicach przyjêtego poziomu istotnoœci - 1%. Jeœli bêdzie on istotnie mniejszy, bêdzie oznacza³o to, ¿e wartoœæ VaR zosta³a przeszacowana, a gdy bêdzie on wiêkszy to znaczy, ¿e ryzyko jest istotnie wiêksze ni¿ wskazuje szacunek. W te sposób godz¹c siê na pewny poziom ryzyka mo¿na straciæ znacznie wiecej. 
+
+
+<h5><b>UAH</b></h5>
+
+```{r, echo = FALSE, message=FALSE,fig.align = 'center', out.extra='angle=90', warning=FALSE}
+hist_UAH <- hist(kursy$UAH)
+```
+
+W przypadku UAH najwiêksze ryzyko wystêpowa³o na pocz¹tku 2015, gdzie dzienne zmiany by³y du¿e. Inwestuj¹c w tym czasie w kurs UAH na 99% mo¿naby straciæ ok 0.12 z³ na 1 UAH. Gdybyby poziom straty przekroczy³ wartoœæ VaR, to mo¿naby straciæ ok 0.2 z³ na 1 UAH. Mo¿na zauwa¿yæ, ¿e jak wartoœæ VaR roœnie, to ES jest bardziej oddalone od VaR na wykresie. Je¿eli natomiast wartoœæ VaR jest mniej wiêcej na tym samym poziomie to wartoœæ ES jest do niej zbli¿ona.
+
+
+<h5><b>THB</b></h5>
+
+```{r, echo = FALSE, message=FALSE,fig.align = 'center', out.extra='angle=90', warning=FALSE}
+hist_THB <- hist(kursy$THB)
+```
+
+Jeœli chodzi o THB to wykres pokazuje, ¿e wartoœæ VaR mo¿e byæ trochê niedoszacowana pod koniec 2014 i na pocz¹tku 2015 roku gdy¿ jest du¿o obserwacji, które w tym okresie przekraczaj¹ VaR i ES. Widaæ, ¿e wartoœæ VaR nie zmienia siê znacz¹co w czasie, przez ca³y badany okres znajduje siê w przedziale (0.01 - 0.02).
+
+###Metoda historyczna "z wagami"
+
+```{r, echo = TRUE, message=FALSE,fig.align = 'center', out.extra='angle=90', warning=FALSE}
+#datê biorê o 502, gdy¿ potrzebujê tylko tych które maj¹ obliczony VaR
+doVaR_w <- data.frame(date = kursy$data[-(1:501)])
+hist_wag <- function(dane,q){
+  data <- data.frame(data = dane)
+  st_zwrotu <- c()
+  VAR <- c()
+  ES <- c()
+  waga <- c()
+  for(i in 1:500){
+    waga[i] <- (q^(500-i) * (1-q)) / (1-q^500)
+  }
+  for (i in 2:nrow(data)){
+    st_zwrotu[i] <- log(data[i,]/data[i-1,])
+  }
+  st_zwrotu <- st_zwrotu[-1]
+  data <- data[-1,1]
+  for(j in 1:(length(data) - 499)){
+    zwag <- data.frame(st_zwrotu[j:(499+j)],waga)
+    #sortowanie stóp zwrotu i liczenie skumulowanej sumy wag
+    zwag <- zwag[order(zwag[,1]),]
+    zwag <- cbind(zwag, skumulowane = cumsum(zwag$waga))
+    #wziêcie pierwszej wartoœci przekraczaj¹cej poziom ufnoœci
+    VAR[499+j] <- -zwag[nrow(zwag[zwag$skumulowane <= 0.01,])+ 1,1]
+    ES[499+j] <- - mean(zwag[ zwag$st_zwrotu<= -VAR[499+j],1])
+  }
+  st_zwrotu <- st_zwrotu[-(1:500)]
+  VAR <- VAR[-(1:500)]
+  ES <- ES[-(1:500)]
+  data <- data[-(1:500)]
+  
+  doVaR_w <- cbind(doVaR_w, data, st_zwrotu, VAR,ES)
+  melt <- melt(doVaR_w, id.vars = c("date", "data"), na.rm = T)
+  z <- ggplot(melt, aes(x = date, y = value, colour = variable)) + geom_line()
+  plot(z)
+  return(doVaR_w$VAR)
+}
+```
+
+
+<h5><b>EURO</b></h5>
+
+```{r, echo = FALSE, message=FALSE,fig.align = 'center', out.extra='angle=90', warning=FALSE}
+wag_EUR <- hist_wag(kursy$EUR,0.995)
+```
+W metodzie z wagami mo¿na zaobserwowaæ wiêksz¹ zmiennoœæ jeœli chodzi o wartoœci VaR i ES. Mo¿na zauwa¿yæ kilka obserwacji, które przekaczaj¹ VaR, choæ na pierwszy rzuta oka wydaj¹ siê one mieœciæ w dopuszczlnej liczbie wyj¹tków.
+
+
+<h5><b>UAH</b></h5>
+
+```{r, echo = FALSE, message=FALSE,fig.align = 'center', out.extra='angle=90', warning=FALSE}
+wag_UAH <- hist_wag(kursy$UAH,0.995)
+```
+W przypadku UAH mo¿na przypuszczaæ, ¿e wartoœæ VaR jest przeszacowana - jest niewiele wyj¹tków. Oznacza to, ¿e w rzczywistoœci ryzyko jest mniejsze ni¿ wskazuje szacowana wartoœæ VaR.
+
+
+<h5><b>THB</b></h5>
+
+
+```{r, echo = FALSE, message=FALSE,fig.align = 'center', out.extra='angle=90', warning=FALSE}
+wag_THB <- hist_wag(kursy$THB,0.995)
+```
+
+Dla THB w metodzi historycznej z wagami równie¿ spodziewam siê niedoszacowania wartoœci VaR.
+
+###Metoda bootstrapowa
+
+```{r, echo = TRUE, message=FALSE,fig.align = 'center', out.extra='angle=90', warning=FALSE}
+#datê biorê o 502, gdy¿ potrzebujê tylko tych które maj¹ obliczony VaR
+  doVaR_b <- data.frame(date = kursy$data[-(1:501)])
+  boot <- function(dane){
+    data <- data.frame(data = dane)
+    st_zwrotu <- c()
+    VAR <- c()
+    ES <- c()
+    for (i in 2:nrow(data)){
+      st_zwrotu[i] <- log(data[i,]/data[i-1,]) 
+    }
+    st_zwrotu <- st_zwrotu[-1]
+    data <- data[-1,1]
+    for(j in 1:(length(data)-499)){
+      vary <- NA
+      es <- NA
+      for(i in 1:20){
+        #losujê 20 scenariuszy i liczê dla nich VaR i ES
+        rand <- sample(st_zwrotu[j:(j+499)], 1000, replace = T)
+        vary <- rbind(vary,-quantile(rand,0.01, na.rm = T))
+        es <- rbind(es,-mean(rand[rand <= quantile(rand,0.01, na.rm = T)]))
+      }  
+      #usuwam NA
+      VAR[j+499] <- mean(vary[-1,])
+      ES[499+j] <- mean(es[-1,])
+      
+    }
+  st_zwrotu <- st_zwrotu[-(1:500)]
+  VAR <- VAR[-(1:500)]
+  ES <- ES[-(1:500)]
+  data <- data[-(1:500)]
+    
+    doVaR_b <- cbind(doVaR_b, data, st_zwrotu, VAR,ES)
+    melt <- melt(doVaR_b, id.vars = c("date", "data"), na.rm = T)
+    z <- ggplot(melt, aes(x = date, y = value, colour = variable)) + geom_line()
+    plot(z)
+    return(doVaR_b$VAR)
+  }
+```
+
+
+<h5><b>EURO</b></h5>
+
+```{r, echo = FALSE, message=FALSE,fig.align = 'center', out.extra='angle=90', warning=FALSE}
+boot_EUR <- boot(kursy$EUR)
+```
+
+
+<h5><b>UAH</b></h5>
+
+```{r, echo = FALSE, message=FALSE,fig.align = 'center', out.extra='angle=90', warning=FALSE}
+boot_UAH <- boot(kursy$UAH)
+```
+
+<h5><b>THB</b></h5>
+
+```{r, echo = FALSE, message=FALSE,fig.align = 'center', out.extra='angle=90', warning=FALSE}
+boot_THB <- boot(kursy$THB)
+```
+
+Metoda bootstrapowa, która bazuje na metodzie historycznej prostej, wydaje siê dawaæ podobne wyniki dla ka¿dej z trzech walut. 
+
+##Metoda EWMA
+
+```{r, echo = TRUE, message=FALSE,fig.align = 'center', out.extra='angle=90', warning=FALSE}
+#datê biorê o 502, gdy¿ potrzebujê tylko tych które maj¹ obliczony VaR
+doVaR_EWMA <- data.frame(date = kursy$data[-(1:501)])
+EWMA <- function(dane, sigma1, lambda){
+  data <- data.frame(data = dane)
+  st_zwrotu <- c()
+  VAR <- c()
+  ES <- c()
+  for (i in 2:nrow(data)){
+    st_zwrotu[i] <- log(data[i,]/data[i-1,]) 
+  }
+  st_zwrotu <- st_zwrotu[-1]
+  data <- data[-1,1]
+  
+  for(j in 1:(length(st_zwrotu) - 499)){
+  okno <- st_zwrotu[j:(499+j)]
+  sigma <- c(sigma1)
+  wartosc <- c()
+    #obliczanie wariancji dla okien
+    for(i in 1:length(okno)){
+    sigma[i+1] = sqrt(lambda *sigma[i] ^2 + (1-lambda) * okno[i]^2)
+  }
+  for(i in 1:length(okno)){
+    wartosc[i] <- okno[i] * (sigma[length(sigma)]/sigma[i])
+  }
+    VAR[499+j] <- -quantile(wartosc,0.01, na.rm = T)
+    ES[499+j] <- - mean(wartosc[wartosc <= -VAR[499+j]])
+  }
+  VAR <- VAR[-(1:500)]
+  ES <- ES[-(1:500)]
+  st_zwrotu <- st_zwrotu[-(1:500)]
+  data <- data[-(1:500)]
+  doVaR_EWMA <- cbind(doVaR_EWMA, data,st_zwrotu, VAR,ES)
+  melt <- melt(doVaR_EWMA, id.vars = c("date", "data"), na.rm = T)
+  z <- ggplot(melt, aes(x = date, y = value, colour = variable)) + geom_line()
+  plot(z)
+  return(doVaR_EWMA$VAR)
+}
+```
+
+
+<h5><b>EURO</b></h5>
+
+```{r, echo = FALSE, message=FALSE,fig.align = 'center', out.extra='angle=90', warning=FALSE}
+EWMA_EUR <- EWMA(kursy$EUR,0.01, 0.94)
+```
+
+Metoda EWMA dla EURO choæ nie odstaje a¿ tak bardzo od dziennych zmian, posiada bardzo ma³o wyj¹tków. Z tego wzglêdu spodziewam siê du¿ego przeszacowania wartoœci VaR.
+
+
+<h5><b>UAH</b></h5>
+
+```{r, echo = FALSE, message=FALSE,fig.align = 'center', out.extra='angle=90', warning=FALSE}
+EWMA_UAH <- EWMA(kursy$UAH, 0.01,0.94)
+```
+Dla UAH wyj¹tków nie ma prawie wcale, wiêc w tym przypadku metoda EWMA równie¿ siê nie sprawdzi.
+
+<h5><b>THB</b></h5>
+
+
+```{r, echo = FALSE, message=FALSE,fig.align = 'center', out.extra='angle=90', warning=FALSE}
+EWMA_THB <- EWMA(kursy$THB, 0.01,0.94)
+```
+Dla THB sytuacja wygl¹da tak jak powy¿ej.
+
+###Wykresy przedstawiaj¹ce wartoœci VaR w zale¿noœci od metody
+
+####Wykresy VaR dla EURO
+```{r, echo = FALSE, message=FALSE,fig.align = 'center', out.extra='angle=90', warning=FALSE}
+EUR_metody <- data.frame(date = kursy$data[502:1764],  hist_EUR, wag_EUR,boot_EUR,EWMA_EUR)
+melt <- melt(EUR_metody, id.vars = c("date"), na.rm = T)
+ggplot(melt, aes(x = date, y = value, colour = variable)) + geom_line()
+```
+Metoda historyczna prosta i bootstrap daj¹ niemal¿e identyczne wyniki. Metoda historyczna z wagami dla q = 0.995 mniej wiêcej pokrywa siê z poprzednimi metodami, jednak mo¿na tu zauwa¿yæ ju¿ pewne odchylenia. Metoda EWMA natomiast odstaje najbardziej - w bardzo niewielkim stopniu pokrywa siê z reszt¹ metod.
+
+####Wykresy VaR dla UAH
+```{r, echo = FALSE, message=FALSE,fig.align = 'center', out.extra='angle=90', warning=FALSE}
+UAH_metody <- data.frame(date = kursy$data[502:1764],  hist_UAH, wag_UAH,boot_UAH,EWMA_UAH)
+melt <- melt(UAH_metody, id.vars = c("date"), na.rm = T)
+ggplot(melt, aes(x = date, y = value, colour = variable)) + geom_line()
+```
+W 2015 roku dla UAH metoda EWMA zdecydowanie przeszacowa³a wartoœæ VaR. Jej szacunkowa wartoœæ w tamtym okresie wynios³a prawie 6 razy wiêcej ni¿ wskazuj¹ metody historyczna prosta i bootstrapowa, zaœ metoda historyczna z wagami wskaza³a wartoœæ 2 razy wiêksz¹.
+
+####Wykresy VaR dla THB
+```{r, echo = FALSE, message=FALSE,fig.align = 'center', out.extra='angle=90', warning=FALSE}
+THB_metody <- data.frame(date = kursy$data[502:1764],  hist_THB, wag_THB,boot_THB,EWMA_THB)
+melt <- melt(THB_metody, id.vars = c("date"), na.rm = T)
+ggplot(melt, aes(x = date, y = value, colour = variable)) + geom_line()
+```
+Dla THB ró¿nice miêdzy metodami s¹ podobne jak w przyk³adach powy¿ej. Metoda EWMA daje najwiêksze rozstrza³y szacowanej wartoœci VaR.
+
+```{r, echo = FALSE, message=FALSE,fig.align = 'center', out.extra='angle=90', warning=FALSE}
+#obliczanie stóp zwrotu dla poszczególnych walut
+st_zwrotu_THB <- c()
+st_zwrotu_UAH <- c()
+st_zwrotu_EUR <- c()
+for (i in 2:nrow(kursy)){
+  st_zwrotu_THB[i] <- log(kursy$THB[i]/kursy$THB[i-1]) 
+  st_zwrotu_UAH[i] <- log(kursy$UAH[i]/kursy$UAH[i-1]) 
+  st_zwrotu_EUR[i] <- log(kursy$EUR[i]/kursy$EUR[i-1]) 
+}
+#usuwanie obserwacji, które nie maj¹ odpowiednika w VaR
+st_zwrotu_THB <- st_zwrotu_THB[-(1:501)]
+st_zwrotu_UAH <- st_zwrotu_UAH[-(1:501)]
+st_zwrotu_EUR <- st_zwrotu_EUR[-(1:501)]
+```
+
+```{r, echo = TRUE, message=FALSE,fig.align = 'center', out.extra='angle=90', warning=FALSE}
+wsteczny <- function(stopy, var){   
+wyjatki <- 0
+czyOk <- 0
+#test wartoœci rzeczywistych
+for (i in 1:length(st_zwrotu_EUR)){
+  #strata jako wartoœæ dodatnia
+  if(-stopy[i] >= var[i])
+  {
+    wyjatki = wyjatki +1
+  }
+  proc <- sum(wyjatki)/length(st_zwrotu_EUR) * 100
+}
+#test zasiêgu
+  czyNiedoszacowany <- (1-pbinom(wyjatki-1, length(st_zwrotu_EUR), 0.01))*100
+  czyPrzeszacowany <- (pbinom(wyjatki-1, length(st_zwrotu_EUR), 0.01))*100
+
+  sprawdzenie <- data.frame(proc,czyNiedoszacowany,czyPrzeszacowany)
+  return(sprawdzenie)
+}
+```
+
+```{r, echo = FALSE, message=FALSE,fig.align = 'center', out.extra='angle=90', warning=FALSE}
+EUR_h <- wsteczny(st_zwrotu_EUR, hist_EUR)
+EUR_w <- wsteczny(st_zwrotu_EUR, wag_EUR)
+EUR_b <- wsteczny(st_zwrotu_EUR, boot_EUR)
+EUR_EWMA <-wsteczny(st_zwrotu_EUR, EWMA_EUR)
+EURO <- data.frame(historyczna =EUR_h, wagowa = EUR_w,bootstrap =  EUR_b,EWMA = EUR_EWMA)
+
+UAH_h <- wsteczny(st_zwrotu_UAH, hist_UAH)
+UAH_w <- wsteczny(st_zwrotu_UAH, wag_UAH)
+UAH_b <- wsteczny(st_zwrotu_UAH, boot_UAH)
+UAH_EWMA <- wsteczny(st_zwrotu_UAH, EWMA_UAH)
+UAH <- data.frame(historyczna=UAH_h,wagowa= UAH_w,bootstrap= UAH_b,EWMA= UAH_EWMA)
+
+THB_h <- wsteczny(st_zwrotu_THB, hist_THB)
+THB_w <- wsteczny(st_zwrotu_THB, wag_THB)
+THB_b <- wsteczny(st_zwrotu_THB, boot_THB)
+THB_EWMA <- wsteczny(st_zwrotu_THB, EWMA_THB)
+THB <- data.frame(historyczna=THB_h,wagowa= THB_w,bootstrap= THB_b,EWMA= THB_EWMA)
+
+
+```
+
+##Testy wsteczne
+
+###Test wartoœci rzeczywistych i test zasiêgu
+
+W teœcie wartoœci rzeczywistych zostanie sprawdzony procent wyj¹tków - czyli przypadków, w których wartoœæ VaR jest mniejsza ni¿ strata. Procentowa wartoœæ b³êdu powinna oscylowaæ w granicach poziomu istotnoœci, tj. 1%. Dodatkowo, aby sprawdziæ czy procentowy wynik jest zadowalaj¹cy, pos³u¿ê siê testem zasiêgu, który poinformuje, czy wartoœæ VaR zosta³a przeszacowana, niedoszacowana, czy jest w porz¹dku. Poni¿sze wyniki przedstawiaj¹ wartoœci procentowe. Jeœli w kolumnie "czyNiedoszacowany" lub "czyPrzeszacowany" pojawi siê wartoœæ mniejsza od 5% bêdziemy mieæ informacjê, ¿e wartoœæ VaR zosta³a Ÿle oszacowana. Idealna sytacja jest wtedy, gdy kolumny sprawdzaj¹ce prawid³owe oszacowanie oscyluj¹ w granicach 50%.
+
+####Wyniki dla EURO
+
+```{r, echo = TRUE, message=FALSE,fig.align = 'center', out.extra='angle=90', warning=FALSE}
+EUR_h 
+EUR_w
+EUR_b
+EUR_EWMA
+```
+Wartoœci VaR dla Euro najlepiej szacuje metoda historyczna z wagami, której wartoœæ b³êdu wynosi 0.79%. W pozosta³ych kolumnach nie pojawia siê wartoœæ mniejsza ni¿ 5%, dlatego VaR jest obliczony dobrze, choæ nie najlepiej, o czym œwiadcz¹ wartoœci w pozosta³ych kolumnach. Metoda historyczna tak¿e mieœci siê w przedziale. Metoda EWMA i bootstrap natomiast prezentuj¹ siê zdecydowanie najgorzej,gdy¿ zawy¿y³y wartoœæ VaR.
+
+###Wyniki dla UAH
+
+```{r, echo = TRUE, message=FALSE,fig.align = 'center', out.extra='angle=90', warning=FALSE}
+UAH_h 
+UAH_w
+UAH_b
+UAH_EWMA
+```
+Dla UAH zdecydowanie najlepiej sprawdzi³a siê metoda z wagami. Jej oszacowanie jest niemal¿e idealne. Metoda bootstrapowa i historyczna prosta tak¿e s¹ dobre, choæ trochê odstaj¹ od wagowej. Meoda EWMA z kolei przeszacowa³a VaR.
+
+###Wyniki dla THB
+
+```{r, echo = TRUE, message=FALSE,fig.align = 'center', out.extra='angle=90', warning=FALSE}
+THB_h
+THB_w
+THB_b
+THB_EWMA
+```
+Dla THB metoda historyczna z wagami i bootstrapowa daj¹ taki sam wynik, historyczna prosta jest gorsza, jednak mieœci siê w przedziale. Metoda EWMA po raz kolejny okaza³a siê byæ najgorsz¹ .
+
+##Podsumowanie
+
+Najlepsz¹ metod¹ do szacowania wartoœci VaR dla ka¿dej z walut okaza³a siê byæ metoda historyczna z wagami, która w przypadku UAH sprawdzi³a siê niemal¿e idealnie, a dla THB tak¿e ma ca³kiem fajny wynik. Najgorsze wyniki osi¹gnê³a dla EURO. Metodê historyczn¹ mo¿na postawiæ na drugim miejscu, gdy¿ w ka¿dym przypadku mieœci siê w granicach dopuszczalnych, jednak jej poziom przeszacowania i niedoszacowania odbiega od 50%. Metoda bootstrap przeszacowa³a wartoœæ VaR dla EURO. W pozosta³ych przypadkach jest w porzadku, chocia¿ dla THB prezentuje siê lepiej. Zdecydowanie najgorsz¹ z metod jest EWMA, która w ka¿dym przypadku by³a t¹ metod¹, która najs³abiej szacowa³a VaR.
+
